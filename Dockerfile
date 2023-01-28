@@ -10,7 +10,7 @@ ARG version
 RUN echo $app
 RUN echo $version
 
-EXPOSE 8080
+EXPOSE ${PORT}
 
 RUN pwd
 
