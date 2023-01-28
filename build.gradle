@@ -1,0 +1,183 @@
+/**
+ * To add capabilities. For ex: jacoco plugin to generate code coverage report,
+ * jfrog.artifactory to resolve dependencies etc.
+ */
+plugins {
+    id 'org.springframework.boot' version '2.6.4'
+    id 'io.spring.dependency-management' version '1.0.11.RELEASE'
+    id 'com.jfrog.artifactory' version '4.28.2'
+    id 'groovy'
+    id 'jacoco'
+    id 'maven-publish'
+    id 'checkstyle'
+    id 'com.github.hierynomus.license' version '0.16.1'
+    id 'application'
+}
+
+/**
+ * For code styling
+ */
+checkstyle {
+    toolVersion "8.8"
+}
+
+group 'com.chalocodekare.skeleton'
+version "${version}"
+depVersion = "${depVersion}"
+
+sourceCompatibility = '17'
+targetCompatibility = '17'
+
+/**
+ * Dependencies Resolution
+ */
+repositories {
+    mavenLocal() // Prefer local dependencies
+    mavenCentral() // Download from maven centre
+// Uncomment if you are using artifactory.
+//    maven {
+//        url "${artifactoryContextUrl}/name-of-repositories"
+//        credentials {
+//            username = artifactoryUsername
+//            password = artifactoryPassword
+//        }
+//    }
+
+}
+
+/**
+ * Artifacts and BuildInfo Publication. Check https://www.jfrog.com/confluence/display/JFROG/Gradle+Artifactory+Plugin
+ */
+artifactory {
+    contextUrl = "${artifactoryContextUrl}" //The base Artifactory URL if not overridden by the publisher/resolver
+    publish {
+        repository {
+            if (version.contains('snapshot') || version.contains('SNAPSHOT'))
+                repoKey = 'libs-snapshot-local' //The Artifactory repository key to publish to
+            else
+                repoKey = 'libs-release-local'
+
+            username = "${artifactoryUsername}" //The publisher user name
+            password = "${artifactoryPassword}" //The publisher password or API key
+        }
+        defaults {
+            //List of Gradle Publications (names or objects) from which to collect the list of artifacts to be deployed to Artifactory.
+            publishArtifacts = true //Publish artifacts to Artifactory (true by default)
+            publications('mavenJava')
+        }
+    }
+}
+
+
+//https://docs.gradle.org/current/userguide/publishing_setup.html
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
+}
+
+//https://github.com/spring-projects/spring-boot/issues/12316
+//To detect the presence of the annotation processor
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+/**
+ * Dependencies
+ */
+dependencies {
+    def spockVersion = '2.2-M1-groovy-4.0'
+    def excludeGroovyAll = {
+        exclude group: 'org.codehaus.groovy'
+    }
+
+    implementation 'org.springframework.data:spring-data-commons'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    testImplementation group: 'org.springframework.boot', name: 'spring-boot-starter-test'
+    testImplementation group: 'org.spockframework', name: 'spock-core', version: spockVersion, excludeGroovyAll
+    testImplementation group: 'org.spockframework', name: 'spock-spring', version: spockVersion, excludeGroovyAll
+
+    testRuntimeOnly group: 'org.spockframework', name: 'spock-core', version: spockVersion, excludeGroovyAll
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+
+//To exclude classes from jacoco report.
+def jacocoExcludeFromReport = ['**/com/chalocodekare/skeleton/Application*',
+                               '**/com/chalocodekare/skeleton/constants/**']
+
+
+jacocoTestReport {
+    dependsOn test
+
+    group = "Reporting"
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+        html.outputLocation = file("${buildDir}/reports/coverage")
+    }
+    afterEvaluate {
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: jacocoExcludeFromReport)
+        }))
+    }
+}
+
+//To exclude classes from jacoco coverage check.
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            enabled = true
+            element = 'CLASS'
+            includes = ['com.chalocodekare.skeleton.*']
+            excludes = ['com.chalocodekare.skeleton.Application',
+                        'com.chalocodekare.skeleton.constants.*']
+            limit {
+                counter = 'LINE'
+                minimum = 0.9
+            }
+        }
+    }
+}
+
+test {
+    finalizedBy jacocoTestReport
+    finalizedBy jacocoTestCoverageVerification
+}
+
+
+//by default bootrun on development profile
+bootRun {
+    systemProperties = System.properties
+    systemProperty 'spring.profiles.active', 'development'
+}
+
+
+//To let you override the logical main-class called loader.main
+bootJar {
+    manifest {
+        attributes 'Main-Class': 'org.springframework.boot.loader.PropertiesLauncher'
+    }
+}
+
+jar.enabled = true
+
+//To update license header in all java & groovy classes.
+license {
+    ext.year = Calendar.getInstance().get(Calendar.YEAR)
+    includes(["**/*.java", "**/*.groovy"])
+}
+classes.dependsOn(licenseFormat)

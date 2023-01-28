@@ -1,0 +1,18 @@
+spring:
+  profiles:
+    active: production
+
+logging:
+  level:
+    root: INFO
+    com.chalocodekare.skeleton.*: INFO
+
+---
+
+spring:
+  config:
+    activate:
+      on-profile: production
+
+server:
+  port: 8080

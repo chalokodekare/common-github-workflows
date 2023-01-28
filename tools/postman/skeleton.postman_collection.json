@@ -1,0 +1,44 @@
+{
+  "info": {
+    "_postman_id": "cdac6b80-74f4-4e41-baf6-aae406a98593",
+    "name": "Skeleton",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "3340613"
+  },
+  "item": [
+    {
+      "name": "healthcheck",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:3131/health",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "3131",
+          "path": [
+            "health"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
