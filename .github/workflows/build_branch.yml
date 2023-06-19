@@ -1,0 +1,15 @@
+name: Build Branch
+
+on:
+  # Triggers the workflow on 'push on any branch except main branch'.
+  push:
+    branches-ignore: [ main ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+
+  validate_branch:
+    uses: ./.github/workflows/workflow_build.yml
+    secrets: inherit

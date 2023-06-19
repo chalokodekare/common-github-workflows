@@ -1,0 +1,162 @@
+name: Deploy Workflow
+
+on:
+  workflow_call:
+    inputs:
+      image-tag:
+        description: "Docker image tag to be deployed"
+        required: true
+        type: string
+      env-name:
+        description: "Environment name"
+        required: false
+        type: string
+        default: 'live'
+      geography-name:
+        description: "Geography location of the resource/server"
+        required: false
+        type: string
+        default: 'us'
+      deploy-env:
+        description: "Environment name"
+        required: true
+        type: string
+        default: "dev"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.deploy-env }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_NAME: "chalocodekare-${{ inputs.deploy-env }}"
+  ENV_NAME: ${{ inputs.env-name || 'live' }}
+  GEOGRAPHY_NAME: ${{ inputs.geography-name || 'us' }}
+  ACR_NAME: "chalocodekare-cr"
+  ACR_PROJECT: "chalocodekare"
+  ACR_ENV: "live"
+  ACR_GEOGRAPHY: "us"
+  KEY_VAULT: "chalocodekare-key-vault"
+  WEB_CONTAINER_NAME: "cgw-service"
+  IMAGE_NAME: "cgw-service"
+  IMAGE_TAG: ${{ inputs.image-tag }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.deploy-env }}
+    steps:
+      - name: 'SETUP - Checkout Branch Code'
+        uses: actions/checkout@v2
+
+      - name: 'Initialize env vars for staging environment'
+        if: ${{ env.ENV_NAME == 'staging'}}
+        run: |
+          echo "AUTH_ENDPOINT=https://login.staging.external.byp.ai/realms/Env/protocol/openid-connect/token" >> ${GITHUB_ENV}
+          echo "API_ENDPOINT=https://api.staging.external.byp.ai" >> ${GITHUB_ENV}
+
+      - name: 'Initialize env vars for live environment'
+        if: ${{ env.ENV_NAME == 'live'}}
+        run: |
+          echo "AUTH_ENDPOINT=https://login.live.external.byp.ai/realms/Env/protocol/openid-connect/token" >> ${GITHUB_ENV}
+          echo "API_ENDPOINT=https://api.live.external.byp.ai" >> ${GITHUB_ENV}
+
+      - name: 'Initialize secrets from github environment'
+        run: |
+          echo "SPN_CLIENT_ID=${{ secrets.COMMON_ENV_SPN_CLIENT_ID }}" >> ${GITHUB_ENV}
+          echo "SPN_CLIENT_SECRET=${{ secrets.COMMON_ENV_SPN_CLIENT_SECRET }}" >> ${GITHUB_ENV}
+
+      - name: 'Checkout BY-Product-Development/ds-github-actions'
+        uses: actions/checkout@v2
+        with:
+          repository: BY-Product-Development/ds-github-actions
+          ref: master
+          ssh-key: ${{ secrets.DS_GITHUB_GH_ACTIONS_CHECKOUT_SSH_KEY }}
+          persist-credentials: false
+          path: ./actions
+
+      - name: 'Get Env Access Token'
+        id: env_login
+        uses: ./actions/env/login
+        with:
+          client-id: ${SPN_CLIENT_ID}
+          client-secret: ${SPN_CLIENT_SECRET}
+          auth-endpoint: ${AUTH_ENDPOINT}
+
+      - name: 'Initialize Env Access Token'
+        run: |
+          echo "ENV_ACCESS_TOKEN=${{ steps.env_login.outputs.env-access-token }}" >> ${GITHUB_ENV}
+
+      - name: 'Env ACR information'
+        id: env_acr
+        uses: ./actions/env/container_registry
+        with:
+          resource-name: ${ACR_NAME}
+          project-name: ${ACR_PROJECT}
+          geography-name: ${ACR_GEOGRAPHY}
+          stage: ${ACR_ENV}
+
+      - name: 'Initialize ACR endpoint'
+        run: |
+          echo "ACR_ENDPOINT=${{ steps.env_acr.outputs.endpoint-url }}" >> ${GITHUB_ENV}
+
+      - name: 'Initialize docker image'
+        run: |
+          echo "DOCKER_IMAGE=${{ env.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" >> ${GITHUB_ENV}
+
+      - name: 'Env Key-vault information'
+        id: env_key_vault
+        uses: ./actions/env/key_vault
+        with:
+          project-name: ${PROJECT_NAME}
+          geography-name: ${GEOGRAPHY_NAME}
+          resource-name: ${KEY_VAULT}
+          stage: ${ENV_NAME}
+
+      - name: 'Initialize key vault resource name'
+        run: |
+          echo "KEY_VAULT_RESOURCE_NAME=${{ steps.env_key_vault.outputs.key-vault-name }}" >> ${GITHUB_ENV}
+
+      - name: 'Deploy Web Container To Env'
+        shell: bash
+        id: command-run
+        run: |
+          set -ex
+          mkdir web-container-deployment
+          PROJECT_RESOURCE_URL="${API_ENDPOINT}/geographies/${GEOGRAPHY_NAME}/projects/${PROJECT_NAME}/resources" \
+            && echo PROJECT_RESOURCE_URL=${PROJECT_RESOURCE_URL}
+
+          keyVaultConfig=$(jq -n \
+            --arg keyVaultName "${{ env.KEY_VAULT }}" \
+            -f ./env/container-keyvault-config.json )
+
+          containerWebSpec=$(jq -n \
+            --arg image "${{ env.DOCKER_IMAGE }}" \
+            --argjson keyVaultConfig "${keyVaultConfig}" \
+            -f env/container-web-spec.json )
+
+          echo containerWebSpec=${containerWebSpec}
+          echo ${containerWebSpec} > web-container-deployment/containerWebSpec.json
+
+          containerWebUpdateResponse=$(curl -X PUT "${PROJECT_RESOURCE_URL}/container-web/${WEB_CONTAINER_NAME}" \
+            -H "Authorization: Bearer ${ENV_ACCESS_TOKEN}" \
+            -H "accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d "${containerWebSpec}" ) && echo containerWebUpdateResponse=${containerWebUpdateResponse}
+
+          echo ${containerWebUpdateResponse} > web-container-deployment/containerWebUpdateResponse.json
+
+      - name: 'Extract web container response'
+        id: container_response
+        run: |
+          set -ex
+          SERVICE_ENDPOINT_URL=$(cat web-container-deployment/containerWebUpdateResponse.json | jq -r '.links.endpoint.url')
+          WEB_CONTAINER_STATE=$(cat web-container-deployment/containerWebUpdateResponse.json | jq -r '.status.state')
+          echo "SERVICE_ENDPOINT_URL=${SERVICE_ENDPOINT_URL}" >> ${GITHUB_ENV}
+          echo "WEB_CONTAINER_STATE=${WEB_CONTAINER_STATE}" >> ${GITHUB_ENV}
+
+      - name: 'Verify web container state'
+        if: ${{ env.WEB_CONTAINER_STATE != 'reconciling' || env.WEB_CONTAINER_STATE == 'error'}}
+        uses: actions/github-script@v3
+        with:
+          script: |
+            core.setFailed('Web Container did not restart or in error state. Please check.')

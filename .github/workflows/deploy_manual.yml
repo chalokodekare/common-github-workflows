@@ -1,0 +1,30 @@
+name: Manual Deploy
+
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      image-tag:
+        description: "Docker image tag"
+        required: true
+      deploy-env:
+        description: "Environment name"
+        required: true
+        default: "dev"
+      env-name:
+        description: "Env"
+        required: true
+        default: 'live'
+      geography-name:
+        description: "Geography location of the resource/server"
+        required: true
+        default: 'us'
+jobs:
+  deploy:
+    uses: ./.github/workflows/workflow_deploy.yml
+    with:
+      image-tag: ${{ github.event.inputs.image-tag }}
+      deploy-env: ${{ github.event.inputs.deploy-env }}
+      env-name: ${{ github.event.inputs.env-name }}
+      geography-name: ${{ github.event.inputs.geography-name }}
+    secrets: inherit
