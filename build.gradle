@@ -159,7 +159,7 @@ test {
 }
 
 
-//by default bootrun on development profile
+//By default start bootrun on development profile
 bootRun {
     systemProperties = System.properties
     systemProperty 'spring.profiles.active', 'development'

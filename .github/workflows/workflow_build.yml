@@ -1,0 +1,84 @@
+name: Build Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      gradleArgs:
+        description: 'Gradle args'
+        required: false
+        default: ''
+
+  # Allows you to run this workflow from some other workflow.
+  workflow_call:
+
+env:
+  CODACY_TOKEN: ${{ secrets.CODACY_TOKEN }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 'SETUP - Checkout Branch Code'
+        uses: actions/checkout@v2
+
+      - name: 'Provides environment variables from .env file.'
+        id: dotenv
+        uses: falti/dotenv-action@v0.2.6
+        with:
+          path: .github/workflows/.env
+          log-variables: true
+
+      - name: "Set up Java ${{ steps.dotenv.outputs.JAVA_VERSION }}"
+        uses: actions/setup-java@v2
+        with:
+          java-version: "${{ steps.dotenv.outputs.JAVA_VERSION }}"
+          distribution: '${{ steps.dotenv.outputs.JAVA_DISTRIBUTION }}'
+
+      - name: 'GRANT PERMISSION - Grant execute permission for gradlew'
+        run: chmod +x gradlew
+
+      - name: 'SETUP - gradle.properties'
+        run: |
+          echo "artifactoryContextUrl=${{ secrets.ARTIFACTORY_CONTEXT_URL }}" >> gradle.properties
+          echo "artifactoryUsername=${{ secrets.ARTIFACTORY_USER }}" >> gradle.properties
+          echo "artifactoryPassword=${{ secrets.ARTIFACTORY_TOKEN }}" >> gradle.properties
+
+      - name: 'BUILD - Libraries'
+        run: |
+          ./gradlew build serviceTest ${{ inputs.gradleArgs }}
+
+      - name: 'Codacy Coverage Reporter'
+        uses: codacy/codacy-coverage-reporter-action@v1.3.0
+        with:
+          project-token: ${{ secrets.CODACY_TOKEN }}
+          coverage-reports: build/reports/jacoco/test/jacocoTestReport.xml
+
+      - name: Publish reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: Test-reports
+          path: |
+            build/reports
+
+      - name: Publish Unit Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          check_name: "Unit Test Results"
+          files: |
+            build/test-results/test/**/*.xml
+
+      - name: Publish Service Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          check_name: "Service Test Results"
+          files: |
+            build/test-results/serviceTest/**/*.xml
